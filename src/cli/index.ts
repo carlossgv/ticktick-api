@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env node --no-warnings
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import prompts from 'prompts';

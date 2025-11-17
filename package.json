@@ -6,7 +6,7 @@
   "private": true,
   "license": "UNLICENSED",
   "bin": {
-    "ticktick": "./dist/cli/index.js"
+    "ticktick-api": "./dist/cli/index.js"
   },
   "scripts": {
     "build": "nest build",
