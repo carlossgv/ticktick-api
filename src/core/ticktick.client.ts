@@ -98,7 +98,7 @@ export class TickTickClient {
       if (axios.isAxiosError<ErrorLoginResponse>(err) && err.response?.data) {
         const error = err.response.data;
         console.error(
-          `Login failed! Code: ${error.errorCode}, Message: ${error.errorMessage}, ID: ${error.errorId}`,
+          `Login failed for user ${username}! Code: ${error.errorCode}, Message: ${error.errorMessage}, ID: ${error.errorId}`,
         );
         console.error(`Remainder times: ${error.data.remainderTimes}`);
         return;
