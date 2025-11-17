@@ -2,6 +2,7 @@
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import prompts from 'prompts';
+import axios from 'axios';
 import { TicktickApp } from 'src/core/ticktick.app';
 
 type LoginAnswers = {
@@ -11,12 +12,30 @@ type LoginAnswers = {
 
 const app = new TicktickApp();
 
+const API_URL = process.env.TICKTICK_API_URL;
+
 async function handleLogout(): Promise<void> {
+  if (API_URL) {
+    console.log(
+      'logout via CLI no está soportado cuando usas API remoto. ' +
+        'Configura las credenciales directamente en el servidor.',
+    );
+    return;
+  }
+
   await app.logout();
   console.log('Logged out successfully.');
 }
 
 async function handleLogin(): Promise<void> {
+  if (API_URL) {
+    console.log(
+      'login via CLI no está soportado cuando usas API remoto. ' +
+        'Configura las credenciales directamente en el servidor.',
+    );
+    return;
+  }
+
   // prompts devuelve any; aceptamos el cast controlado
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const response = (await prompts([
@@ -34,9 +53,26 @@ async function handleLogin(): Promise<void> {
 }
 
 async function handleQuickAdd(text: string): Promise<void> {
+  // MODO API REMOTO
+  if (API_URL) {
+    try {
+      await axios.post(`${API_URL}/tasks/quick-add`, { text });
+      console.log('Task added successfully (via API)');
+    } catch (error: any) {
+      console.error(
+        'Error calling remote API:',
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        error?.response?.data ?? error?.message ?? error,
+      );
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  // MODO LOCAL (usa TicktickApp)
   try {
     await app.quickAdd(text);
-    console.log('Task added successfully');
+    console.log('Task added successfully (local)');
   } catch (error) {
     console.error('Error parsing or adding task:', error);
     process.exitCode = 1;
@@ -50,11 +86,12 @@ async function main(): Promise<void> {
     .option('login', {
       alias: 'l',
       type: 'boolean',
-      describe: 'Log into your TickTick account via email/password',
+      describe:
+        'Log into your TickTick account via email/password (local mode)',
     })
     .option('logout', {
       type: 'boolean',
-      describe: 'Log out and remove session cookies',
+      describe: 'Log out and remove session cookies (local mode)',
     })
     .help()
     .parseAsync();

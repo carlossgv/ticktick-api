@@ -53,8 +53,34 @@ export class TickTickClient {
   }
 
   async getSessionCookies(): Promise<string[]> {
-    const data = await fs.readFile(this.cookieFile, 'utf-8');
-    return data.split(';').map((s) => s.trim());
+    try {
+      const data = await fs.readFile(this.cookieFile, 'utf-8');
+      return data.split(';').map((s) => s.trim());
+    } catch (err: unknown) {
+      // Si el archivo no existe, intentamos login con env
+      if (this.isErrnoException(err) && err.code === 'ENOENT') {
+        const creds = this.getEnvCredentials();
+
+        if (!creds) {
+          throw new Error(
+            'No TickTick session found and TICKTICK_EMAIL/TICKTICK_PASSWORD (o ticktick_email/ticktick_password) are not set. ' +
+              'In local mode, run login from the CLI; in server mode, configure env vars.',
+          );
+        }
+
+        console.log(
+          'No session file found. Logging into TickTick using environment variables...',
+        );
+        await this.login(creds.email, creds.password);
+
+        // Reintentamos leer la cookie recién escrita
+        const data = await fs.readFile(this.cookieFile, 'utf-8');
+        return data.split(';').map((s) => s.trim());
+      }
+
+      // Otro tipo de error → lo propagamos
+      throw err;
+    }
   }
 
   async login(username: string, password: string): Promise<void> {
@@ -368,5 +394,18 @@ export class TickTickClient {
         return mapper(task, condition);
       }),
     );
+  }
+
+  private getEnvCredentials(): { email: string; password: string } | null {
+    const email =
+      process.env.TICKTICK_EMAIL ?? process.env.ticktick_email ?? '';
+    const password =
+      process.env.TICKTICK_PASSWORD ?? process.env.ticktick_password ?? '';
+
+    if (!email || !password) {
+      return null;
+    }
+
+    return { email, password };
   }
 }

@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
-import { TicktickModule } from './api/ticktick/ticktick.module';
+import { TasksModule } from './api/tasks/tasks.module';
 
 @Module({
-  imports: [TicktickModule],
+  imports: [TasksModule],
 })
 export class AppModule {}
