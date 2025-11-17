@@ -53,10 +53,19 @@ async function handleLogin(): Promise<void> {
 }
 
 async function handleQuickAdd(text: string): Promise<void> {
+  const API_URL = process.env.TICKTICK_API_URL;
+  const API_KEY = process.env.TICKTICK_API_KEY;
+
   // MODO API REMOTO
   if (API_URL) {
     try {
-      await axios.post(`${API_URL}/tasks/quick-add`, { text });
+      await axios.post(
+        `${API_URL}/tasks/quick-add`,
+        { text },
+        {
+          headers: API_KEY ? { 'x-api-key': API_KEY } : {},
+        },
+      );
       console.log('Task added successfully (via API)');
     } catch (error: any) {
       console.error(
@@ -69,7 +78,7 @@ async function handleQuickAdd(text: string): Promise<void> {
     return;
   }
 
-  // MODO LOCAL (usa TicktickApp)
+  // MODO LOCAL (usa TicktickApp como ya lo tenías)
   try {
     await app.quickAdd(text);
     console.log('Task added successfully (local)');
