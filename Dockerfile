@@ -2,6 +2,13 @@
 FROM node:22-alpine AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
+
+# ✅ timezone database (required for America/Santiago etc.)
+RUN apk add --no-cache tzdata
+
+# ✅ default TZ (puedes override con env en compose)
+ENV TZ=America/Santiago
+
 RUN corepack enable
 
 # Stage 1 — dependencies (best practice for pnpm)

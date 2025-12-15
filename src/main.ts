@@ -1,5 +1,6 @@
 import * as dotenv from 'dotenv';
 dotenv.config();
+process.env.TZ = process.env.TZ?.trim() || 'America/Santiago';
 
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
