@@ -25,7 +25,7 @@ const chronoComponentsToTickTick = (
   const day = toUndef(parsed.get('day')) ?? base.day;
 
   const hasHour = parsed.isCertain('hour');
-  const hour = hasHour ? toUndef(parsed.get('hour')) ?? 0 : 0;
+  const hour = hasHour ? (toUndef(parsed.get('hour')) ?? 0) : 0;
   const minute = toUndef(parsed.get('minute')) ?? 0;
   const second = toUndef(parsed.get('second')) ?? 0;
 
@@ -42,12 +42,12 @@ const chronoComponentsToTickTick = (
     .toFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZZ")
     .replace(/(\+|-)\d\d:\d\d$/, '+0000');
 
-console.debug({
-  DEFAULT_TIMEZONE,
-  local: dtLocal.toISO(),
-  utc: dtUtc.toISO(),
-  ticktick: iso,
-});
+  console.debug({
+    DEFAULT_TIMEZONE,
+    local: dtLocal.toISO(),
+    utc: dtUtc.toISO(),
+    ticktick: iso,
+  });
 
   return { iso, isAllDay: !hasHour };
 };
@@ -82,7 +82,8 @@ export const now = () => {
 };
 
 export const extractDatesFromText = (text: string): ParsedDates => {
-  const results = chrono.parse(text, new Date(), { forwardDate: true });
+  const refDate = DateTime.now().setZone(DEFAULT_TIMEZONE).toJSDate();
+  const results = chrono.parse(text, refDate, { forwardDate: true });
 
   let startDate: string | undefined;
   let dueDate: string | undefined;
@@ -90,9 +91,23 @@ export const extractDatesFromText = (text: string): ParsedDates => {
   const dateTexts: string[] = [];
 
   if (results.length > 0) {
+          if (results[0]?.start) {
+        console.debug('chrono first text:', results[0].text);
+        console.debug(
+          'chrono start date():',
+          results[0].start.date().toString(),
+        );
+        console.debug('chrono start hour:', results[0].start.get('hour'));
+        console.debug(
+          'chrono start meridiem:',
+          results[0].start.get('meridiem'),
+        );
+      }
+
     const first = results[0];
 
     if (first?.start) {
+
       const start = chronoComponentsToTickTick(first.start);
       startDate = start.iso;
       isAllDay = start.isAllDay;
