@@ -9,8 +9,6 @@ const DEFAULT_TIMEZONE =
     ? process.env.TZ
     : 'America/Santiago';
 
-const toUndef = (v: number | null | undefined): number | undefined =>
-  v == null ? undefined : v;
 
 const chronoComponentsToTickTick = (
   parsed: chrono.ParsedComponents,
@@ -41,13 +39,6 @@ const chronoComponentsToTickTick = (
   const iso = dtUtc
     .toFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZZ")
     .replace(/(\+|-)\d\d:\d\d$/, '+0000');
-
-  console.debug({
-    DEFAULT_TIMEZONE,
-    local: dtLocal.toISO(),
-    utc: dtUtc.toISO(),
-    ticktick: iso,
-  });
 
   return { iso, isAllDay: !hasHour };
 };
@@ -91,23 +82,9 @@ export const extractDatesFromText = (text: string): ParsedDates => {
   const dateTexts: string[] = [];
 
   if (results.length > 0) {
-          if (results[0]?.start) {
-        console.debug('chrono first text:', results[0].text);
-        console.debug(
-          'chrono start date():',
-          results[0].start.date().toString(),
-        );
-        console.debug('chrono start hour:', results[0].start.get('hour'));
-        console.debug(
-          'chrono start meridiem:',
-          results[0].start.get('meridiem'),
-        );
-      }
-
     const first = results[0];
 
     if (first?.start) {
-
       const start = chronoComponentsToTickTick(first.start);
       startDate = start.iso;
       isAllDay = start.isAllDay;

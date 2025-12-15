@@ -12,8 +12,5 @@ async function bootstrap() {
   app.enableCors();
   await app.listen(3000);
   Logger.log(`Application is running on: ${await app.getUrl()}`);
-  console.log('env TZ:', process.env.TZ);
-  console.log('resolved tz:', Intl.DateTimeFormat().resolvedOptions().timeZone);
-  console.log('date:', new Date().toString());
 }
 void bootstrap();

@@ -263,35 +263,41 @@ export class TickTickClient {
     }
   }
 
-  async addTasks(tasks: UpdateTaskParams[]): Promise<void> {
-    await this.withAuthRetry(async () => {
-      const body: HandleTasksBody = { add: tasks, update: [], delete: [] };
-      const cookies = await this.getSessionCookies();
-
-      const response = await this.axiosInstance.post<TaskOperationResponse>(
-        `${this.ticktickUrl}/batch/task`,
-        body,
-        { headers: { Cookie: cookies.join(';') } },
-      );
-
-      if (!response.data || Object.keys(response.data.id2error).length > 0) {
-        console.error(
-          `Error in task operation: ${JSON.stringify(response.data.id2error)}`,
-        );
-      }
-    });
-  }
-
-async fetchProjects(): Promise<TickTickProject[]> {
-  return this.withAuthRetry(async () => {
+async addTasks(tasks: UpdateTaskParams[]): Promise<void> {
+  await this.withAuthRetry(async () => {
+    const body: HandleTasksBody = { add: tasks, update: [], delete: [] };
     const cookies = await this.getSessionCookies();
-    const response = await this.axiosInstance.get<TickTickProject[]>(
-      `${this.ticktickUrl}/projects`,
+
+    const response = await this.axiosInstance.post<TaskOperationResponse>(
+      `${this.ticktickUrl}/batch/task`,
+      body,
       { headers: { Cookie: cookies.join(';') } },
     );
-    return response.data;
+
+    if (!response.data) {
+      throw new Error('TickTick returned empty response');
+    }
+
+    const errors = response.data.id2error;
+
+    if (errors && Object.keys(errors).length > 0) {
+      throw new Error(
+        `TickTick task creation failed: ${JSON.stringify(errors)}`,
+      );
+    }
   });
 }
+
+  async fetchProjects(): Promise<TickTickProject[]> {
+    return this.withAuthRetry(async () => {
+      const cookies = await this.getSessionCookies();
+      const response = await this.axiosInstance.get<TickTickProject[]>(
+        `${this.ticktickUrl}/projects`,
+        { headers: { Cookie: cookies.join(';') } },
+      );
+      return response.data;
+    });
+  }
 
   private clearCaches() {
     this.projectsCache = null;
