@@ -9,6 +9,7 @@ export class TasksService {
     await client.init(); // lo que ya haces en el CLI
 
     const taskBody = await convertStringToTaskBody(text, client);
+    console.debug('Task body created:', taskBody);
     await client.addTasks([taskBody]);
   }
 }

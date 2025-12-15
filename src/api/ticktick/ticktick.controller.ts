@@ -1,7 +1,7 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Post } from '@nestjs/common';
 import { TicktickService } from './ticktick.service';
 
-@Controller('ticktick')
+@Controller()
 export class TicktickController {
   constructor(private readonly service: TicktickService) {}
 
@@ -15,25 +15,5 @@ export class TicktickController {
   async logout() {
     await this.service.logout();
     return { ok: true };
-  }
-
-  @Post('quick-add')
-  async quickAdd(@Body() body: { text: string }) {
-    return this.service.quickAdd(body.text);
-  }
-
-  @Get('lists')
-  async getLists() {
-    return this.service.getLists();
-  }
-
-  @Get('tasks/inbox')
-  async inbox() {
-    return this.service.getInboxTasks();
-  }
-
-  @Get('tasks')
-  async byProject(@Query('projectId') projectId: string) {
-    return this.service.getTasksByProject(projectId);
   }
 }
