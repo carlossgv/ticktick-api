@@ -9,7 +9,7 @@ export class TasksService {
   async quickAdd(text: string): Promise<void> {
     const client = this.ticktick.get();
     const taskBody = await convertStringToTaskBody(text, client);
+    console.debug('Creating task with body:', taskBody);
     await client.addTasks([taskBody]);
   }
 }
-

@@ -15,26 +15,29 @@ const toUndef = (v: number | null | undefined): number | undefined =>
 const chronoComponentsToTickTick = (
   parsed: chrono.ParsedComponents,
 ): { iso: string; isAllDay: boolean } => {
-  // year/month/day deben existir; si no, caemos a "hoy" en TZ
   const base = DateTime.now().setZone(DEFAULT_TIMEZONE);
+
+  const toUndef = (v: number | null | undefined): number | undefined =>
+    v == null ? undefined : v;
 
   const year = toUndef(parsed.get('year')) ?? base.year;
   const month = toUndef(parsed.get('month')) ?? base.month;
   const day = toUndef(parsed.get('day')) ?? base.day;
 
   const hasHour = parsed.isCertain('hour');
-  const hour = hasHour ? (toUndef(parsed.get('hour')) ?? 0) : 0;
-
+  const hour = hasHour ? toUndef(parsed.get('hour')) ?? 0 : 0;
   const minute = toUndef(parsed.get('minute')) ?? 0;
   const second = toUndef(parsed.get('second')) ?? 0;
 
-  const dt = DateTime.fromObject(
+  const dtLocal = DateTime.fromObject(
     { year, month, day, hour, minute, second },
     { zone: DEFAULT_TIMEZONE },
   );
 
-  const iso = dt
-    .toUTC()
+  // 👇 clave: conservar la hora local, pero marcar como UTC (+0000)
+  const dtFloatingUtc = dtLocal.setZone('UTC', { keepLocalTime: true });
+
+  const iso = dtFloatingUtc
     .toFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZZ")
     .replace(/(\+|-)\d\d:\d\d$/, '+0000');
 
