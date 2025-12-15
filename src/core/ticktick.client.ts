@@ -18,12 +18,20 @@ import { List } from './types/list.types';
 import { now } from './text-parser';
 
 function getFilePath(filename: string): string {
+  const dataDir = process.env.TICKTICK_DATA_DIR?.trim();
+
+  if (dataDir) {
+    return path.join(dataDir, filename);
+  }
+
   const home = os.homedir();
   if (!home) throw new Error('Unable to determine the home directory.');
   return path.join(home, filename);
 }
 
 export class TickTickClient {
+  private projectsCache: { data: TickTickProject[]; expiresAt: number } | null =
+    null;
   private cookieFile: string;
   private axiosInstance: AxiosInstance;
   private ticktickUrl = 'https://api.ticktick.com/api/v2';
@@ -54,6 +62,7 @@ export class TickTickClient {
 
   async getSessionCookies(): Promise<string[]> {
     try {
+      await fs.mkdir(path.dirname(this.cookieFile), { recursive: true });
       const data = await fs.readFile(this.cookieFile, 'utf-8');
       return data.split(';').map((s) => s.trim());
     } catch (err: unknown) {
@@ -134,21 +143,19 @@ export class TickTickClient {
   }
 
   async getMainData(): Promise<TickTickMainResponse> {
-    const cookies = await this.getSessionCookies();
-    const response = await this.axiosInstance.get<TickTickMainResponse>(
-      `${this.ticktickUrl}/batch/check/0`,
-      {
-        headers: {
-          Cookie: cookies.join(';'),
-        },
-      },
-    );
+    return this.withAuthRetry(async () => {
+      const cookies = await this.getSessionCookies();
+      const response = await this.axiosInstance.get<TickTickMainResponse>(
+        `${this.ticktickUrl}/batch/check/0`,
+        { headers: { Cookie: cookies.join(';') } },
+      );
 
-    if (!response.data.inboxId || typeof response.data.inboxId !== 'string') {
-      throw new Error('Inbox ID is missing or invalid in response.');
-    }
+      if (!response.data.inboxId || typeof response.data.inboxId !== 'string') {
+        throw new Error('Inbox ID is missing or invalid in response.');
+      }
 
-    return response.data;
+      return response.data;
+    });
   }
 
   private setInboxId(): string {
@@ -257,42 +264,47 @@ export class TickTickClient {
   }
 
   async addTasks(tasks: UpdateTaskParams[]): Promise<void> {
-    const body: HandleTasksBody = {
-      add: tasks,
-      update: [],
-      delete: [],
-    };
+    await this.withAuthRetry(async () => {
+      const body: HandleTasksBody = { add: tasks, update: [], delete: [] };
+      const cookies = await this.getSessionCookies();
 
-    const cookies = await this.getSessionCookies();
-
-    const response = await this.axiosInstance.post<TaskOperationResponse>(
-      `${this.ticktickUrl}/batch/task`,
-      body,
-      {
-        headers: {
-          Cookie: cookies.join(';'),
-        },
-      },
-    );
-
-    if (!response.data || Object.keys(response.data.id2error).length > 0) {
-      console.error(
-        `Error in task operation: ${JSON.stringify(response.data.id2error)}`,
+      const response = await this.axiosInstance.post<TaskOperationResponse>(
+        `${this.ticktickUrl}/batch/task`,
+        body,
+        { headers: { Cookie: cookies.join(';') } },
       );
-    }
+
+      if (!response.data || Object.keys(response.data.id2error).length > 0) {
+        console.error(
+          `Error in task operation: ${JSON.stringify(response.data.id2error)}`,
+        );
+      }
+    });
   }
 
-  async fetchProjects(): Promise<TickTickProject[]> {
+async fetchProjects(): Promise<TickTickProject[]> {
+  return this.withAuthRetry(async () => {
     const cookies = await this.getSessionCookies();
     const response = await this.axiosInstance.get<TickTickProject[]>(
       `${this.ticktickUrl}/projects`,
-      {
-        headers: {
-          Cookie: cookies.join(';'),
-        },
-      },
+      { headers: { Cookie: cookies.join(';') } },
     );
     return response.data;
+  });
+}
+
+  private clearCaches() {
+    this.projectsCache = null;
+  }
+
+  async fetchProjectsCached(ttlMs = 5 * 60 * 1000): Promise<TickTickProject[]> {
+    const now = Date.now();
+    if (this.projectsCache && this.projectsCache.expiresAt > now) {
+      return this.projectsCache.data;
+    }
+    const data = await this.fetchProjects();
+    this.projectsCache = { data, expiresAt: now + ttlMs };
+    return data;
   }
 
   async getLists(): Promise<List[]> {
@@ -407,5 +419,27 @@ export class TickTickClient {
     }
 
     return { email, password };
+  }
+
+  private async withAuthRetry<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err: unknown) {
+      const is401 =
+        axios.isAxiosError(err) &&
+        (err.response?.status === 401 || err.response?.status === 403);
+
+      if (!is401) throw err;
+
+      const creds = this.getEnvCredentials();
+      if (!creds) throw err;
+
+      // Re-login + limpiar caches y reintentar una vez
+      await this.login(creds.email, creds.password);
+      this.clearCaches();
+      await this.refreshMainData();
+
+      return await fn();
+    }
   }
 }

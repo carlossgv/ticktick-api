@@ -1,14 +1,15 @@
 import { Injectable } from '@nestjs/common';
-import { TickTickClient } from 'src/core/ticktick.client';
+import { TickTickClientProvider } from 'src/core/ticktick.provider';
 import { convertStringToTaskBody } from 'src/core/text-parser';
 
 @Injectable()
 export class TasksService {
-  async quickAdd(text: string): Promise<void> {
-    const client = new TickTickClient();
-    await client.init(); // lo que ya haces en el CLI
+  constructor(private readonly ticktick: TickTickClientProvider) {}
 
+  async quickAdd(text: string): Promise<void> {
+    const client = this.ticktick.get();
     const taskBody = await convertStringToTaskBody(text, client);
     await client.addTasks([taskBody]);
   }
 }
+

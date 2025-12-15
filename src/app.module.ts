@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
-import { TasksModule } from './api/tasks/tasks.module';
 import { APP_GUARD } from '@nestjs/core';
 import { ApiKeyGuard } from './common/guards/api-key.guard';
+import { TasksModule } from './api/tasks/tasks.module';
+import { AuthModule } from './api/auth/auth.module';
 
 @Module({
-  imports: [TasksModule],
+  imports: [TasksModule, AuthModule],
   providers: [
     {
       provide: APP_GUARD,

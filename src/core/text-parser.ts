@@ -54,7 +54,7 @@ const matchProjectIdByKey = async (
   projectKey: string,
   client: TickTickClient,
 ): Promise<string | undefined> => {
-  const projects = await client.fetchProjects();
+  const projects = await client.fetchProjectsCached();
   const cleanedKey = cleanProjectName(projectKey);
   const match = projects.find((p) => {
     const cleanedName = cleanProjectName(p.name);
