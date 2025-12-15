@@ -29,6 +29,7 @@
     "axios": "^1.13.2",
     "chrono-node": "^2.9.0",
     "class-validator": "^0.14.2",
+    "dotenv": "^17.2.3",
     "luxon": "^3.7.2",
     "meow": "^14.0.0",
     "prompts": "^2.4.2",
