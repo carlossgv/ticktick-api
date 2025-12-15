@@ -29,17 +29,25 @@ const chronoComponentsToTickTick = (
   const minute = toUndef(parsed.get('minute')) ?? 0;
   const second = toUndef(parsed.get('second')) ?? 0;
 
+  // 1) construimos el “wall time” en la zona lógica
   const dtLocal = DateTime.fromObject(
     { year, month, day, hour, minute, second },
     { zone: DEFAULT_TIMEZONE },
   );
 
-  // 👇 clave: conservar la hora local, pero marcar como UTC (+0000)
-  const dtFloatingUtc = dtLocal.setZone('UTC', { keepLocalTime: true });
+  // 2) lo convertimos a UTC real (instante absoluto)
+  const dtUtc = dtLocal.toUTC();
 
-  const iso = dtFloatingUtc
+  const iso = dtUtc
     .toFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZZ")
     .replace(/(\+|-)\d\d:\d\d$/, '+0000');
+
+console.debug({
+  DEFAULT_TIMEZONE,
+  local: dtLocal.toISO(),
+  utc: dtUtc.toISO(),
+  ticktick: iso,
+});
 
   return { iso, isAllDay: !hasHour };
 };
