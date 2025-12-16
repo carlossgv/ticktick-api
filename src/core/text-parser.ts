@@ -9,6 +9,29 @@ const DEFAULT_TIMEZONE =
     ? process.env.TZ
     : 'America/Santiago';
 
+type ReminderSpec = { minutesBefore: number };
+
+const parseReminderToken = (token: string): ReminderSpec | null => {
+  // -5m, -30m, -1h, -2h, -1d, -0
+  const m = token.match(/^-(\d+)(m|h|d)?$/i);
+  if (!m) return null;
+
+  const value = Number(m[1]);
+  if (!Number.isFinite(value) || value < 0) return null;
+
+  const unit = (m[2] ?? 'm').toLowerCase();
+
+  let minutes = value;
+  if (unit === 'h') minutes = value * 60;
+  if (unit === 'd') minutes = value * 1440;
+
+  return { minutesBefore: minutes };
+};
+
+const minutesToTrigger = (minutesBefore: number): string => {
+  if (minutesBefore === 0) return 'TRIGGER:-PT0S';
+  return `TRIGGER:-PT${minutesBefore}M`;
+};
 
 const chronoComponentsToTickTick = (
   parsed: chrono.ParsedComponents,
@@ -115,26 +138,48 @@ export const convertStringToTaskBody = async (
   str: string,
   client?: TickTickClient,
 ): Promise<UpdateTaskParams> => {
-  const { startDate, dueDate, timeZone, dateTexts, isAllDay } =
-    extractDatesFromText(str);
-
   const words = str.trim().split(/\s+/);
+
   const tags: string[] = [];
   const titleWords: string[] = [];
+  const chronoWords: string[] = [];
+
+  const reminderMinutes: number[] = [];
   let foundProjectKey: string | undefined;
 
   for (const word of words) {
     if (word.startsWith('#') && word.length > 1) {
       tags.push(word.slice(1));
-    } else if (word.startsWith('~')) {
+      // tags no deberían afectar chrono ni el title
+      continue;
+    }
+
+    if (word.startsWith('~')) {
       foundProjectKey = word
         .slice(1)
         .replace(/[^a-zA-Z0-9\- ]/g, '')
         .toLowerCase();
-    } else {
-      titleWords.push(word);
+      // project tampoco debería afectar chrono ni title
+      continue;
     }
+
+    const reminder = parseReminderToken(word); // <- tu parser de -30m/-5m
+    if (reminder) {
+      reminderMinutes.push(reminder.minutesBefore);
+      // 🔥 NO incluir en chronoWords (si no chrono lo resta)
+      // y tampoco en title
+      continue;
+    }
+
+    // palabra normal: va al título y también sirve para chrono
+    titleWords.push(word);
+    chronoWords.push(word);
   }
+
+  // ✅ ahora chrono ve un texto sin "-30m"
+  const textForChrono = chronoWords.join(' ');
+  const { startDate, dueDate, timeZone, dateTexts, isAllDay } =
+    extractDatesFromText(textForChrono);
 
   const title = titleWords
     .filter((word) => !dateTexts.some((dateText) => dateText.includes(word)))
@@ -148,13 +193,17 @@ export const convertStringToTaskBody = async (
   }
 
   let reminders: TickTickReminder[] | undefined = undefined;
+
   if (startDate && isAllDay === false) {
-    reminders = [
-      {
-        id: uuidv4(),
-        trigger: 'TRIGGER:-PT0S',
-      },
-    ];
+    const mins = reminderMinutes.length > 0 ? reminderMinutes : [0];
+    if (!mins.includes(0)) mins.push(0);
+
+    const uniqueSorted = Array.from(new Set(mins)).sort((a, b) => a - b);
+
+    reminders = uniqueSorted.map((m) => ({
+      id: uuidv4(),
+      trigger: minutesToTrigger(m),
+    }));
   }
 
   return {

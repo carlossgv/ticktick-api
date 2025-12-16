@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TICKTICK_API_ENV_FILE="$HOME/.ticktick-api.env"
+TICKTICK_API_ENV_FILE="./.env"
 
 if [ -f "$TICKTICK_API_ENV_FILE" ]; then
   # shellcheck source=/dev/null
