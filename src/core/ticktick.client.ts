@@ -2,6 +2,8 @@ import axios, { AxiosInstance } from 'axios';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto';
+
 import {
   ErrorLoginResponse,
   HandleTasksBody,
@@ -19,46 +21,130 @@ import { now } from './text-parser';
 
 function getFilePath(filename: string): string {
   const dataDir = process.env.TICKTICK_DATA_DIR?.trim();
-
-  if (dataDir) {
-    return path.join(dataDir, filename);
-  }
+  if (dataDir) return path.join(dataDir, filename);
 
   const home = os.homedir();
   if (!home) throw new Error('Unable to determine the home directory.');
   return path.join(home, filename);
 }
 
+type XDevice = {
+  platform: 'web';
+  os: string;
+  device: string;
+  name: string;
+  version: number;
+  id: string;
+  channel: 'website';
+  campaign?: string;
+  websocket?: string;
+};
+
 export class TickTickClient {
   private projectsCache: { data: TickTickProject[]; expiresAt: number } | null =
     null;
-  private cookieFile: string;
+
   private axiosInstance: AxiosInstance;
   private ticktickUrl = 'https://api.ticktick.com/api/v2';
-  private xDeviceHeader =
-    '{"platform":"web","os":"macOS 10.15.7","device":"Chrome 121.0.0.0","name":"","version":5070,"id":"65bcdf6491ea1a2e7db71fbe","channel":"website","campaign":"","websocket":""}';
-
-  private headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'x-device': this.xDeviceHeader,
-  };
 
   private dataFilePath = '.ticktick_data';
+  private deviceIdFilePath = '.ticktick_device_id';
+
+  private cookieFile: string;
+  private deviceIdFile: string;
+
+  private xDeviceHeader: string | null = null;
+
   private inboxId: string | null = null;
   public mainData: TickTickMainResponse | null = null;
 
   constructor() {
     this.cookieFile = getFilePath(this.dataFilePath);
+    this.deviceIdFile = getFilePath(this.deviceIdFilePath);
+
+    // axios instance created without x-device; we inject it once we have a persistent device id
     this.axiosInstance = axios.create({
-      headers: this.headers,
+      headers: {
+        'Content-Type': 'application/json',
+        // Helps look like a browser client; some endpoints are picky.
+        'User-Agent':
+          process.env.TICKTICK_USER_AGENT?.trim() ||
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+      },
       withCredentials: true,
     });
   }
 
   public async init(): Promise<void> {
+    await this.ensureXDeviceHeader();
     this.mainData = await this.getMainData();
     this.inboxId = this.setInboxId();
   }
+
+  // ─────────────────────────────
+  // X-DEVICE
+  // ─────────────────────────────
+
+  private async ensureXDeviceHeader(): Promise<void> {
+    if (this.xDeviceHeader) return;
+
+    await fs.mkdir(path.dirname(this.deviceIdFile), { recursive: true });
+
+    const id = await this.getOrCreateDeviceId();
+    const version = this.getWebClientVersion();
+
+    const xDevice: XDevice = {
+      platform: 'web',
+      os: process.env.TICKTICK_DEVICE_OS?.trim() || 'Node.js',
+      device: process.env.TICKTICK_DEVICE_NAME?.trim() || 'ticktick-api',
+      name: process.env.TICKTICK_DEVICE_LABEL?.trim() || 'ticktick-api',
+      version,
+      id,
+      channel: 'website',
+      campaign: '',
+      websocket: '',
+    };
+
+    this.xDeviceHeader = JSON.stringify(xDevice);
+
+    // set default header on axios instance
+    this.axiosInstance.defaults.headers.common['x-device'] = this.xDeviceHeader;
+
+    // Optional: some endpoints behave better with origin/referer matching webapp
+    if (process.env.TICKTICK_WEB_ORIGIN?.trim()) {
+      this.axiosInstance.defaults.headers.common['Origin'] =
+        process.env.TICKTICK_WEB_ORIGIN.trim();
+    }
+    if (process.env.TICKTICK_WEB_REFERER?.trim()) {
+      this.axiosInstance.defaults.headers.common['Referer'] =
+        process.env.TICKTICK_WEB_REFERER.trim();
+    }
+  }
+
+  private getWebClientVersion(): number {
+    const raw = process.env.TICKTICK_WEB_VERSION?.trim();
+    const v = raw ? Number(raw) : NaN;
+    // fallback to the value you scraped; keep stable unless TickTick changes it
+    return Number.isFinite(v) ? v : 5070;
+  }
+
+  private async getOrCreateDeviceId(): Promise<string> {
+    try {
+      const existing = (await fs.readFile(this.deviceIdFile, 'utf-8')).trim();
+      if (existing) return existing;
+    } catch (err: unknown) {
+      if (!(this.isErrnoException(err) && err.code === 'ENOENT')) throw err;
+    }
+
+    // 24 hex chars (similar shape to what you scraped)
+    const newId = crypto.randomBytes(12).toString('hex');
+    await fs.writeFile(this.deviceIdFile, newId, 'utf-8');
+    return newId;
+  }
+
+  // ─────────────────────────────
+  // SESSION / AUTH
+  // ─────────────────────────────
 
   async getSessionCookies(): Promise<string[]> {
     try {
@@ -66,14 +152,13 @@ export class TickTickClient {
       const data = await fs.readFile(this.cookieFile, 'utf-8');
       return data.split(';').map((s) => s.trim());
     } catch (err: unknown) {
-      // Si el archivo no existe, intentamos login con env
       if (this.isErrnoException(err) && err.code === 'ENOENT') {
         const creds = this.getEnvCredentials();
 
         if (!creds) {
           throw new Error(
             'No TickTick session found and TICKTICK_EMAIL/TICKTICK_PASSWORD (o ticktick_email/ticktick_password) are not set. ' +
-              'In local mode, run login from the CLI; in server mode, configure env vars.',
+              'In local mode, run login; in server mode, configure env vars.',
           );
         }
 
@@ -82,17 +167,17 @@ export class TickTickClient {
         );
         await this.login(creds.email, creds.password);
 
-        // Reintentamos leer la cookie recién escrita
         const data = await fs.readFile(this.cookieFile, 'utf-8');
         return data.split(';').map((s) => s.trim());
       }
 
-      // Otro tipo de error → lo propagamos
       throw err;
     }
   }
 
   async login(username: string, password: string): Promise<void> {
+    await this.ensureXDeviceHeader();
+
     try {
       const body = { username, password };
       const response = await this.axiosInstance.post(
@@ -103,22 +188,16 @@ export class TickTickClient {
       const cookies = response.headers['set-cookie'] || [];
       await fs.writeFile(this.cookieFile, cookies.join(';'));
     } catch (err: unknown) {
-      // Narrow to AxiosError with a response
       if (axios.isAxiosError<ErrorLoginResponse>(err) && err.response?.data) {
         const error = err.response.data;
-        console.error(
-          `Login failed for user ${username}! Code: ${error.errorCode}, Message: ${error.errorMessage}, ID: ${error.errorId}`,
+        throw new Error(
+          `Login failed! Code: ${error.errorCode}, Message: ${error.errorMessage}, ID: ${error.errorId}`,
         );
-        console.error(`Remainder times: ${error.data.remainderTimes}`);
-        return;
       }
-
-      // Not an Axios error (or no response data) → rethrow
       throw err;
     }
   }
 
-  // helper somewhere in the same file or a utils file
   private isErrnoException(error: unknown): error is NodeJS.ErrnoException {
     return typeof error === 'object' && error !== null && 'code' in error;
   }
@@ -131,8 +210,6 @@ export class TickTickClient {
         console.warn('No session found to log out.');
         return;
       }
-
-      console.error('Failed to log out:', err);
       throw err;
     }
   }
@@ -142,7 +219,13 @@ export class TickTickClient {
     this.inboxId = this.setInboxId();
   }
 
+  // ─────────────────────────────
+  // API CALLS
+  // ─────────────────────────────
+
   async getMainData(): Promise<TickTickMainResponse> {
+    await this.ensureXDeviceHeader();
+
     return this.withAuthRetry(async () => {
       const cookies = await this.getSessionCookies();
       const response = await this.axiosInstance.get<TickTickMainResponse>(
@@ -150,7 +233,7 @@ export class TickTickClient {
         { headers: { Cookie: cookies.join(';') } },
       );
 
-      if (!response.data.inboxId || typeof response.data.inboxId !== 'string') {
+      if (!response.data?.inboxId || typeof response.data.inboxId !== 'string') {
         throw new Error('Inbox ID is missing or invalid in response.');
       }
 
@@ -197,6 +280,8 @@ export class TickTickClient {
   }
 
   async deleteTasks(tasks: DeleteTaskParams[]): Promise<void> {
+    await this.ensureXDeviceHeader();
+
     const cookies = await this.getSessionCookies();
 
     const body: HandleTasksBody = {
@@ -204,19 +289,17 @@ export class TickTickClient {
       update: [],
       delete: tasks,
     };
+
     const response = await this.axiosInstance.post<TaskOperationResponse>(
       `${this.ticktickUrl}/batch/task`,
       body,
-      {
-        headers: {
-          Cookie: cookies.join(';'),
-        },
-      },
+      { headers: { Cookie: cookies.join(';') } },
     );
 
-    if (!response.data || Object.keys(response.data.id2error).length > 0) {
-      console.error(
-        `Error in task operation: ${JSON.stringify(response.data.id2error)}`,
+    if (!response.data) throw new Error('TickTick returned empty response');
+    if (Object.keys(response.data.id2error ?? {}).length > 0) {
+      throw new Error(
+        `TickTick delete failed: ${JSON.stringify(response.data.id2error)}`,
       );
     }
   }
@@ -233,6 +316,8 @@ export class TickTickClient {
   }
 
   async updateTasks(tasks: UpdateTaskParams[]): Promise<void> {
+    await this.ensureXDeviceHeader();
+
     const updatedTasks = tasks.map((task) => ({
       ...task,
       modifiedTime: now(),
@@ -249,46 +334,44 @@ export class TickTickClient {
     const response = await this.axiosInstance.post<TaskOperationResponse>(
       `${this.ticktickUrl}/batch/task`,
       body,
-      {
-        headers: {
-          Cookie: cookies.join(';'),
-        },
-      },
+      { headers: { Cookie: cookies.join(';') } },
     );
 
-    if (!response.data || Object.keys(response.data.id2error).length > 0) {
-      console.error(
-        `Error in task operation: ${JSON.stringify(response.data.id2error)}`,
+    if (!response.data) throw new Error('TickTick returned empty response');
+    if (Object.keys(response.data.id2error ?? {}).length > 0) {
+      throw new Error(
+        `TickTick update failed: ${JSON.stringify(response.data.id2error)}`,
       );
     }
   }
 
-async addTasks(tasks: UpdateTaskParams[]): Promise<void> {
-  await this.withAuthRetry(async () => {
-    const body: HandleTasksBody = { add: tasks, update: [], delete: [] };
-    const cookies = await this.getSessionCookies();
+  async addTasks(tasks: UpdateTaskParams[]): Promise<void> {
+    await this.ensureXDeviceHeader();
 
-    const response = await this.axiosInstance.post<TaskOperationResponse>(
-      `${this.ticktickUrl}/batch/task`,
-      body,
-      { headers: { Cookie: cookies.join(';') } },
-    );
+    await this.withAuthRetry(async () => {
+      const body: HandleTasksBody = { add: tasks, update: [], delete: [] };
+      const cookies = await this.getSessionCookies();
 
-    if (!response.data) {
-      throw new Error('TickTick returned empty response');
-    }
-
-    const errors = response.data.id2error;
-
-    if (errors && Object.keys(errors).length > 0) {
-      throw new Error(
-        `TickTick task creation failed: ${JSON.stringify(errors)}`,
+      const response = await this.axiosInstance.post<TaskOperationResponse>(
+        `${this.ticktickUrl}/batch/task`,
+        body,
+        { headers: { Cookie: cookies.join(';') } },
       );
-    }
-  });
-}
+
+      if (!response.data) throw new Error('TickTick returned empty response');
+
+      const errors = response.data.id2error;
+      if (errors && Object.keys(errors).length > 0) {
+        throw new Error(
+          `TickTick task creation failed: ${JSON.stringify(errors)}`,
+        );
+      }
+    });
+  }
 
   async fetchProjects(): Promise<TickTickProject[]> {
+    await this.ensureXDeviceHeader();
+
     return this.withAuthRetry(async () => {
       const cookies = await this.getSessionCookies();
       const response = await this.axiosInstance.get<TickTickProject[]>(
@@ -304,12 +387,12 @@ async addTasks(tasks: UpdateTaskParams[]): Promise<void> {
   }
 
   async fetchProjectsCached(ttlMs = 5 * 60 * 1000): Promise<TickTickProject[]> {
-    const now = Date.now();
-    if (this.projectsCache && this.projectsCache.expiresAt > now) {
+    const t = Date.now();
+    if (this.projectsCache && this.projectsCache.expiresAt > t) {
       return this.projectsCache.data;
     }
     const data = await this.fetchProjects();
-    this.projectsCache = { data, expiresAt: now + ttlMs };
+    this.projectsCache = { data, expiresAt: t + ttlMs };
     return data;
   }
 
@@ -318,23 +401,13 @@ async addTasks(tasks: UpdateTaskParams[]): Promise<void> {
     const filters = this.getFilters();
 
     return [
-      ...filters.map((f) => ({
-        id: f.id,
-        name: f.name,
-        isFilter: true,
-      })),
-      ...projects.map((p) => ({
-        id: p.id,
-        name: p.name,
-        isFilter: false,
-      })),
+      ...filters.map((f) => ({ id: f.id, name: f.name, isFilter: true })),
+      ...projects.map((p) => ({ id: p.id, name: p.name, isFilter: false })),
     ];
   }
 
   getFilters(): List[] {
-    if (!this.mainData?.filters) {
-      return [];
-    }
+    if (!this.mainData?.filters) return [];
     return this.mainData.filters.map((filter) => ({
       id: filter.id,
       name: filter.name,
@@ -345,16 +418,9 @@ async addTasks(tasks: UpdateTaskParams[]): Promise<void> {
   private parseFilterRule(rule: string): TickTickFilterRule | null {
     try {
       const parsed = JSON.parse(rule) as TickTickFilterRule;
-
-      // sanity check mínima para no confiar 100% en el cast
-      if (!parsed || !Array.isArray(parsed.and)) {
-        console.error('Invalid filter rule format:', parsed);
-        return null;
-      }
-
+      if (!parsed || !Array.isArray(parsed.and)) return null;
       return parsed;
-    } catch (error) {
-      console.error('Error parsing filter rule:', error);
+    } catch {
       return null;
     }
   }
@@ -383,32 +449,20 @@ async addTasks(tasks: UpdateTaskParams[]): Promise<void> {
   getTasksByFilter(filterId: string): TickTickTask[] {
     const tasks = this.mainData!.syncTaskBean.update;
 
-    if (!this.mainData?.filters) {
-      return [];
-    }
+    if (!this.mainData?.filters) return [];
 
     const filter = this.mainData.filters.find((f) => f.id === filterId);
+    if (!filter) return [];
 
-    if (!filter) {
-      console.error('Filter not found');
-      return [];
-    }
-
-    if (!filter.rule) {
-      return tasks;
-    }
+    if (!filter.rule) return tasks;
 
     const rule = this.parseFilterRule(filter.rule);
-
-    if (!rule) {
-      console.error('Invalid filter rule');
-      return tasks;
-    }
+    if (!rule) return tasks;
 
     return tasks.filter((task) =>
       rule.and.every((condition) => {
         const mapper = this.conditionMappers[condition.conditionName];
-        if (!mapper) return true; // condición desconocida -> ignorar
+        if (!mapper) return true;
         return mapper(task, condition);
       }),
     );
@@ -420,10 +474,7 @@ async addTasks(tasks: UpdateTaskParams[]): Promise<void> {
     const password =
       process.env.TICKTICK_PASSWORD ?? process.env.ticktick_password ?? '';
 
-    if (!email || !password) {
-      return null;
-    }
-
+    if (!email || !password) return null;
     return { email, password };
   }
 
@@ -440,7 +491,7 @@ async addTasks(tasks: UpdateTaskParams[]): Promise<void> {
       const creds = this.getEnvCredentials();
       if (!creds) throw err;
 
-      // Re-login + limpiar caches y reintentar una vez
+      await this.ensureXDeviceHeader();
       await this.login(creds.email, creds.password);
       this.clearCaches();
       await this.refreshMainData();
