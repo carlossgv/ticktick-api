@@ -15,8 +15,8 @@ RUN corepack enable
 FROM base AS deps
 WORKDIR /app
 
-# Copiamos solo package.json + pnpm-lock.yaml
-COPY package.json pnpm-lock.yaml ./
+# Copiamos el manifiesto, lockfile y la política de scripts
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
 # pnpm fetch descarga dependencias al store pero NO las instala
 RUN pnpm fetch
@@ -25,7 +25,7 @@ RUN pnpm fetch
 FROM base AS builder
 WORKDIR /app
 
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
 # Copiamos el store del stage anterior
 COPY --from=deps /pnpm/store /pnpm/store
@@ -45,8 +45,8 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Copiamos package.json y lockfile
-COPY package.json pnpm-lock.yaml ./
+# Copiamos el manifiesto, lockfile y la política de scripts
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
 # Copiamos el store del deps stage
 COPY --from=deps /pnpm/store /pnpm/store
