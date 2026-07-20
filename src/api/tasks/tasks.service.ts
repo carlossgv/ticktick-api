@@ -23,6 +23,13 @@ export type TodayTasksResult = {
   today: TaskListItem[];
 };
 
+export type NextWeekTasksResult = {
+  startDate: string;
+  endDate: string;
+  timeZone: string;
+  tasks: TaskListItem[];
+};
+
 type TaskGroup = 'overdue' | 'today';
 
 type ClassifiedTask = {
@@ -131,6 +138,45 @@ export class TasksService {
     };
   }
 
+  async getNextWeekTasks(
+    now = DateTime.now(),
+  ): Promise<NextWeekTasksResult> {
+    const client = this.ticktick.get();
+    const [tasks, projects] = await Promise.all([
+      client.fetchTasks(),
+      client.fetchProjectsCached(),
+    ]);
+    const timeZone = getTimezone();
+    const todayStart = now.setZone(timeZone).startOf('day');
+    const nextWeekStart = todayStart.startOf('week').plus({ weeks: 1 });
+    const nextWeekEnd = nextWeekStart.endOf('week');
+    const projectNames = new Map(
+      projects.map((project) => [project.id, project.name]),
+    );
+    const inboxId = client.getInboxId();
+    const nextWeekTasks: ClassifiedTask[] = [];
+
+    for (const task of tasks) {
+      const classified = this.classifyNextWeekTask(
+        task,
+        projectNames,
+        inboxId,
+        timeZone,
+        nextWeekStart,
+        nextWeekEnd,
+      );
+
+      if (classified) nextWeekTasks.push(classified);
+    }
+
+    return {
+      startDate: nextWeekStart.toISODate()!,
+      endDate: nextWeekEnd.toISODate()!,
+      timeZone,
+      tasks: nextWeekTasks.sort(compareClassifiedTasks).map(({ item }) => item),
+    };
+  }
+
   private classifyTask(
     task: TickTickTask,
     projectNames: Map<string, string>,
@@ -170,6 +216,46 @@ export class TasksService {
       group,
       isAllDay: task.isAllDay,
       sortAt,
+      item: {
+        id: task.id,
+        title: task.title.trim() || '(Untitled task)',
+        project,
+        when: formatTaskWhen(start, due, task.isAllDay),
+      },
+    };
+  }
+
+  private classifyNextWeekTask(
+    task: TickTickTask,
+    projectNames: Map<string, string>,
+    inboxId: string,
+    timeZone: string,
+    nextWeekStart: DateTime,
+    nextWeekEnd: DateTime,
+  ): ClassifiedTask | null {
+    if (!isOpenTask(task)) return null;
+
+    const start = parseTaskDate(task.startDate, timeZone);
+    const due = parseTaskDate(task.dueDate, timeZone);
+    const scheduledAt = start ?? due;
+
+    if (!scheduledAt) return null;
+
+    if (start && due) {
+      if (start > nextWeekEnd || due < nextWeekStart) return null;
+    } else if (scheduledAt < nextWeekStart || scheduledAt > nextWeekEnd) {
+      return null;
+    }
+
+    const project =
+      task.projectId === inboxId
+        ? 'Inbox'
+        : (projectNames.get(task.projectId) ?? 'Unknown project');
+
+    return {
+      group: 'today',
+      isAllDay: task.isAllDay,
+      sortAt: start ?? due!,
       item: {
         id: task.id,
         title: task.title.trim() || '(Untitled task)',

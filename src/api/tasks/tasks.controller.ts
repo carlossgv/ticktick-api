@@ -29,4 +29,14 @@ export class TasksController {
       ...result,
     };
   }
+
+  @Get('next-week')
+  async nextWeek() {
+    const result = await this.tasksService.getNextWeekTasks();
+
+    return {
+      status: 'ok',
+      ...result,
+    };
+  }
 }

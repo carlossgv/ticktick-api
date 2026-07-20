@@ -187,3 +187,61 @@ describe('TasksService.getTodayTasks', () => {
     ]);
   });
 });
+
+describe('TasksService.getNextWeekTasks', () => {
+  beforeEach(() => {
+    process.env.TZ = 'America/Santiago';
+  });
+
+  it('returns open tasks scheduled during the next Monday through Sunday', async () => {
+    const client = {
+      fetchTasks: jest.fn().mockResolvedValue([
+        task('next-week', { startDate: '2026-07-27T04:00:00.000+0000' }),
+        task('following-week', {
+          startDate: '2026-08-03T04:00:00.000+0000',
+        }),
+        task('spans-next-week', {
+          startDate: '2026-07-26T04:00:00.000+0000',
+          dueDate: '2026-07-28T04:00:00.000+0000',
+        }),
+        task('expired-range', {
+          startDate: '2026-07-20T04:00:00.000+0000',
+          dueDate: '2026-07-26T04:00:00.000+0000',
+        }),
+        task('completed', {
+          startDate: '2026-07-27T04:00:00.000+0000',
+          status: 2,
+        }),
+      ]),
+      fetchProjectsCached: jest.fn().mockResolvedValue([project]),
+      getInboxId: jest.fn().mockReturnValue('inbox'),
+    };
+    const service = new TasksService({
+      get: () => client,
+    } as never);
+
+    const result = await service.getNextWeekTasks(
+      validDateTime('2026-07-20T12:00:00.000+0000'),
+    );
+
+    expect(result).toEqual({
+      startDate: '2026-07-27',
+      endDate: '2026-08-02',
+      timeZone: 'America/Santiago',
+      tasks: [
+        {
+          id: 'spans-next-week',
+          title: 'spans-next-week',
+          project: 'Work',
+          when: '2026-07-26 – 2026-07-28',
+        },
+        {
+          id: 'next-week',
+          title: 'next-week',
+          project: 'Work',
+          when: '2026-07-27',
+        },
+      ],
+    });
+  });
+});
