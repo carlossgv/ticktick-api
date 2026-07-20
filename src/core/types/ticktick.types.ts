@@ -48,6 +48,8 @@ export type TickTickTask = {
   dueDate?: string;
   createdTime: string;
   creator: number;
+  status?: number;
+  deleted?: number;
   // desc: string;
   // isFloating: boolean;
   isAllDay: boolean;
@@ -57,7 +59,6 @@ export type TickTickTask = {
   // exDate: string[];
   // repeatTaskId: string;
   // priority: number;
-  // status: number;
   // // TODO: refine this type
   // items: any[]; // You can refine this if you know the structure
   // progress: number;
